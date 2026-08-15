@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>レシピRAGアシスタント</title>
+<style>
+  :root {
+    --bg: #faf7f2;
+    --card: #ffffff;
+    --ink: #2b2521;
+    --accent: #c0603a;
+    --accent-soft: #f2ded3;
+    --line: #e6ddd2;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Noto Sans CJK JP", "Hiragino Kaku Gothic ProN", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    padding: 24px 16px 60px;
+  }
+  .container { max-width: 640px; margin: 0 auto; }
+  h1 {
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .subtitle {
+    font-size: 13px;
+    color: #8a7f74;
+    margin-bottom: 20px;
+  }
+  .search-box {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 24px;
+  }
+  input[type="text"] {
+    flex: 1;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    font-size: 15px;
+    background: var(--card);
+  }
+  button {
+    padding: 12px 18px;
+    border: none;
+    border-radius: 10px;
+    background: var(--accent);
+    color: white;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 14px;
+  }
+  .card h2 {
+    font-size: 13px;
+    color: var(--accent);
+    margin: 0 0 10px;
+    letter-spacing: 0.02em;
+  }
+  .own-recipe {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .own-recipe:last-child { border-bottom: none; }
+  .own-recipe .title { font-weight: 600; font-size: 14px; }
+  .own-recipe .meta { font-size: 12px; color: #8a7f74; margin-top: 2px; }
+  .answer-text {
+    font-size: 14px;
+    line-height: 1.8;
+    white-space: pre-wrap;
+  }
+  .source-item {
+    font-size: 12px;
+    margin-bottom: 6px;
+  }
+  .source-item a { color: var(--accent); text-decoration: none; }
+  .empty-state {
+    text-align: center;
+    color: #a99e92;
+    font-size: 13px;
+    padding: 40px 0;
+  }
+  .loading {
+    text-align: center;
+    color: #a99e92;
+    font-size: 13px;
+    padding: 20px 0;
+  }
+  .error-box {
+    background: #fbeae4;
+    border: 1px solid #e5b7a5;
+    color: #a33;
+    padding: 12px;
+    border-radius: 10px;
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🍳 レシピRAGアシスタント</h1>
+  <div class="subtitle">自分の保存レシピ＋Web横断検索でレシピ提案</div>
+
+  <div class="search-box">
+    <input type="text" id="queryInput" placeholder="例:余った大根と豚肉で時短レシピ" />
+    <button id="searchBtn" onclick="doSearch()">検索</button>
+  </div>
+
+  <div id="results">
+    <div class="empty-state">気になる食材や気分を入力してみてください</div>
+  </div>
+</div>
+
+<script>
+// ↓ GASのウェブアプリURLをデプロイ後に設定
+const API_URL = "PASTE_YOUR_GAS_WEB_APP_URL_HERE";
+
+const input = document.getElementById('queryInput');
+const btn = document.getElementById('searchBtn');
+const results = document.getElementById('results');
+
+input.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') doSearch();
+});
+
+async function doSearch() {
+  const query = input.value.trim();
+  if (!query) return;
+
+  btn.disabled = true;
+  results.innerHTML = '<div class="loading">検索中...</div>';
+
+  try {
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      body: JSON.stringify({ query })
+    });
+    const data = await res.json();
+
+    if (data.error) {
+      results.innerHTML = `<div class="error-box">エラー: ${escapeHtml(data.error)}</div>`;
+      return;
+    }
+
+    renderResults(data);
+  } catch (err) {
+    results.innerHTML = `<div class="error-box">通信エラー: ${escapeHtml(String(err))}<br>API_URLが正しく設定されているか確認してください。</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderResults(data) {
+  let html = '';
+
+  if (data.ownRecipesUsed && data.ownRecipesUsed.length > 0) {
+    html += '<div class="card"><h2>自分の保存レシピから</h2>';
+    data.ownRecipesUsed.forEach(r => {
+      html += `
+        <div class="own-recipe">
+          <div class="title">${escapeHtml(r.title || '')}</div>
+          <div class="meta">${escapeHtml(r.ingredients || '')}</div>
+        </div>
+      `;
+    });
+    html += '</div>';
+  }
+
+  html += `
+    <div class="card">
+      <h2>提案</h2>
+      <div class="answer-text">${escapeHtml(data.answer || '')}</div>
+    </div>
+  `;
+
+  if (data.sources && data.sources.length > 0) {
+    html += '<div class="card"><h2>参考ソース</h2>';
+    data.sources.forEach(s => {
+      html += `<div class="source-item"><a href="${escapeHtml(s.url)}" target="_blank">${escapeHtml(s.title || s.url)}</a></div>`;
+    });
+    html += '</div>';
+  }
+
+  results.innerHTML = html;
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+</script>
+</body>
+</html>
